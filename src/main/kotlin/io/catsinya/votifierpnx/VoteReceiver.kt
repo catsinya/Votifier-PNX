@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -20,36 +22,35 @@ class VoteReceiver(
     private val gson = Gson()
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
+    private var connectionPool: ExecutorService? = null
     private var token: String = ""
 
     fun start() {
         token = loadOrCreateToken()
+
+        serverSocket = ServerSocket(port)
+        connectionPool = Executors.newFixedThreadPool(4) { runnable ->
+            Thread(runnable, "Votifier-PNX-Worker").apply {
+                isDaemon = true
+            }
+        }
         running.set(true)
+        plugin.logger.info("Vote receiver started on port $port")
 
         Thread({
-            try {
-                serverSocket = ServerSocket(port)
-                plugin.logger.info("Vote receiver started on port $port")
-
-                while (running.get()) {
-                    try {
-                        val socket = serverSocket?.accept() ?: break
-                        Thread({
-                            handleConnection(socket)
-                        }, "Votifier-PNX-Handler").apply {
-                            isDaemon = true
-                            start()
-                        }
-                    } catch (e: Exception) {
-                        if (running.get()) {
-                            plugin.logger.warning("Vote receiver accept error: ${e.message}")
-                        }
+            while (running.get()) {
+                try {
+                    val socket = serverSocket?.accept() ?: break
+                    connectionPool?.submit {
+                        handleConnection(socket)
+                    }
+                } catch (e: Exception) {
+                    if (running.get()) {
+                        plugin.logger.warning("Vote receiver accept error: ${e.message}")
                     }
                 }
-            } catch (e: Exception) {
-                plugin.logger.error("Failed to start vote receiver on port $port: ${e.message}")
             }
-        }, "Votifier-PNX").apply {
+        }, "Votifier-PNX-Acceptor").apply {
             isDaemon = true
             start()
         }
@@ -59,6 +60,10 @@ class VoteReceiver(
         running.set(false)
         try {
             serverSocket?.close()
+        } catch (_: Exception) {
+        }
+        try {
+            connectionPool?.shutdownNow()
         } catch (_: Exception) {
         }
     }

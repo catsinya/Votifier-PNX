@@ -87,7 +87,7 @@ class VotifierPlugin : PluginBase(), Listener {
     }
 
     private fun deliverPendingVotes(username: String) {
-        val pending = voteStore.removePendingVotes(username) ?: return
+        val pending = voteStore.getPendingVote(username) ?: return
         server.scheduler.scheduleDelayedTask(this, Runnable {
             val player = server.getPlayer(username) ?: return@Runnable
             if (!player.isOnline) return@Runnable
@@ -102,6 +102,7 @@ class VotifierPlugin : PluginBase(), Listener {
                         .replace("%service%", pending.serviceName)
                 )
             )
+            voteStore.removePendingVotes(username)
             voteStore.save()
         }, 20)
     }
