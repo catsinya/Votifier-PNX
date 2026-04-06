@@ -141,7 +141,7 @@ class VoteReceiver(
             return true
         }
 
-        plugin.receiveVote(vote.serviceName?.trim().orEmpty().ifBlank { "unknown" }, username)
+        plugin.handleVote(vote.serviceName?.trim().orEmpty().ifBlank { "unknown" }, username)
         out.write("""{"status":"ok"}""".toByteArray(StandardCharsets.UTF_8))
         out.flush()
         return true

@@ -23,6 +23,8 @@ class VoteConfig(private val config: Config) {
 
     fun message(key: String, defaultValue: String): String = config.getString(key, defaultValue)
 
+    fun color(message: String): String = message.replace('&', '§')
+
     data class VoteLink(val name: String, val url: String)
 
     private object Keys {
