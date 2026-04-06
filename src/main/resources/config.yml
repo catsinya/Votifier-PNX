@@ -1,0 +1,12 @@
+port: 8192
+vote-links:
+  - name: MinePortal
+    url: https://mineportal.jp/servers/cmmbvjbdq00009jgcxecbqdco
+reward-commands:
+  - say %player% voted on %service%
+messages:
+  vote-command-header: "&6=== &e&lVote for the Server &6==="
+  vote-command-links: "&eVote links:"
+  vote-command-line: "  &7- &f%name%: &b%url%"
+  vote-received: "&6Thanks for voting on &e%service%&6!"
+  vote-pending-delivered: "&6Your pending vote reward has been delivered."
