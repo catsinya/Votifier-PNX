@@ -24,12 +24,12 @@ class VoteStore(private val file: File) {
 
         for (key in section.keys) {
             val voteSection = section.getSection(key) ?: continue
-            val username = voteSection.getString("username", key)
-            pendingVotes[key.lowercase()] = PendingVote(
+            val username = voteSection.getString(Keys.USERNAME, key)
+            pendingVotes[normalize(key)] = PendingVote(
                 username = username,
-                serviceName = voteSection.getString("service", "unknown"),
-                count = voteSection.getInt("count", 1).coerceAtLeast(1),
-                lastVoteAt = voteSection.getLong("last-vote-at", 0L)
+                serviceName = voteSection.getString(Keys.SERVICE, Defaults.SERVICE),
+                count = voteSection.getInt(Keys.COUNT, Defaults.COUNT).coerceAtLeast(1),
+                lastVoteAt = voteSection.getLong(Keys.LAST_VOTE_AT, Defaults.LAST_VOTE_AT)
             )
         }
     }
@@ -40,17 +40,17 @@ class VoteStore(private val file: File) {
         config.set("pending", null)
 
         for ((key, vote) in pendingVotes) {
-            config.set("pending.$key.username", vote.username)
-            config.set("pending.$key.service", vote.serviceName)
-            config.set("pending.$key.count", vote.count)
-            config.set("pending.$key.last-vote-at", vote.lastVoteAt)
+            config.set(path(key, Keys.USERNAME), vote.username)
+            config.set(path(key, Keys.SERVICE), vote.serviceName)
+            config.set(path(key, Keys.COUNT), vote.count)
+            config.set(path(key, Keys.LAST_VOTE_AT), vote.lastVoteAt)
         }
 
         config.save()
     }
 
     fun addPendingVote(username: String, serviceName: String) {
-        val key = username.lowercase()
+        val key = normalize(username)
         pendingVotes.compute(key) { _, existing ->
             if (existing == null) {
                 PendingVote(username, serviceName, 1, System.currentTimeMillis())
@@ -65,10 +65,27 @@ class VoteStore(private val file: File) {
     }
 
     fun removePendingVote(username: String): PendingVote? {
-        return pendingVotes.remove(username.lowercase())
+        return pendingVotes.remove(normalize(username))
     }
 
     fun getPendingVote(username: String): PendingVote? {
-        return pendingVotes[username.lowercase()]
+        return pendingVotes[normalize(username)]
+    }
+
+    private fun normalize(value: String): String = value.lowercase()
+
+    private fun path(key: String, child: String): String = "pending.$key.$child"
+
+    private object Keys {
+        const val USERNAME = "username"
+        const val SERVICE = "service"
+        const val COUNT = "count"
+        const val LAST_VOTE_AT = "last-vote-at"
+    }
+
+    private object Defaults {
+        const val SERVICE = "unknown"
+        const val COUNT = 1
+        const val LAST_VOTE_AT = 0L
     }
 }

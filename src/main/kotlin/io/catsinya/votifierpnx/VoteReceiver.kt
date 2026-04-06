@@ -1,8 +1,6 @@
 package io.catsinya.votifierpnx
 
 import com.google.gson.Gson
-import com.google.gson.JsonObject
-import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.net.ServerSocket
 import java.net.Socket
@@ -119,68 +117,105 @@ class VoteReceiver(
 
     private fun tryHandleV2Vote(input: java.io.InputStream, out: java.io.OutputStream, challenge: String): Boolean {
         val dataIn = DataInputStream(input)
+        if (!isV2Packet(dataIn)) {
+            return false
+        }
+
+        val rawPayload = readPayload(dataIn, out) ?: return true
+        val envelope = parseEnvelope(rawPayload, out) ?: return true
+        if (!isValidSignature(envelope)) {
+            sendV2Error(out, "signature", "Invalid signature")
+            return true
+        }
+
+        val payload = envelope.payload?.trim().orEmpty()
+        val vote = parseVote(payload, out) ?: return true
+        if (vote.challenge != challenge) {
+            sendV2Error(out, "challenge", "Challenge mismatch")
+            return true
+        }
+
+        val username = vote.username?.trim().orEmpty()
+        if (username.isBlank()) {
+            sendV2Error(out, "payload", "Missing username")
+            return true
+        }
+
+        plugin.receiveVote(vote.serviceName?.trim().orEmpty().ifBlank { "unknown" }, username)
+        out.write("""{"status":"ok"}""".toByteArray(StandardCharsets.UTF_8))
+        out.flush()
+        return true
+    }
+
+    private fun isV2Packet(dataIn: DataInputStream): Boolean {
         val magic = try {
             dataIn.readUnsignedShort()
         } catch (_: Exception) {
             return false
         }
+        return magic == V2_MAGIC
+    }
 
-        if (magic != V2_MAGIC) {
-            return false
+    private fun readPayload(dataIn: DataInputStream, out: java.io.OutputStream): String? {
+        val length = try {
+            dataIn.readUnsignedShort()
+        } catch (_: Exception) {
+            sendV2Error(out, "protocol", "Missing payload length")
+            return null
         }
 
-        val length = dataIn.readUnsignedShort()
         if (length <= 0) {
             sendV2Error(out, "protocol", "Empty Votifier v2 payload")
-            return true
+            return null
         }
 
         val payloadBytes = ByteArray(length)
-        dataIn.readFully(payloadBytes)
+        return try {
+            dataIn.readFully(payloadBytes)
+            String(payloadBytes, StandardCharsets.UTF_8)
+        } catch (_: Exception) {
+            sendV2Error(out, "protocol", "Incomplete Votifier v2 payload")
+            null
+        }
+    }
 
-        try {
-            val rawPayload = String(payloadBytes, StandardCharsets.UTF_8)
-            val envelope = gson.fromJson(rawPayload, JsonObject::class.java)
-            val payload = envelope.get("payload")?.asString ?: run {
-                sendV2Error(out, "payload", "Missing payload")
-                return true
-            }
-            val signature = envelope.get("signature")?.asString ?: run {
-                sendV2Error(out, "payload", "Missing signature")
-                return true
-            }
-
-            val expectedSignature = signPayload(payload)
-            if (!MessageDigest.isEqual(
-                    signature.toByteArray(StandardCharsets.UTF_8),
-                    expectedSignature.toByteArray(StandardCharsets.UTF_8)
-                )
-            ) {
-                sendV2Error(out, "signature", "Invalid signature")
-                return true
-            }
-
-            val vote = gson.fromJson(payload, JsonObject::class.java)
-            if ((vote.get("challenge")?.asString ?: "") != challenge) {
-                sendV2Error(out, "challenge", "Challenge mismatch")
-                return true
-            }
-
-            val serviceName = vote.get("serviceName")?.asString ?: "unknown"
-            val username = vote.get("username")?.asString ?: ""
-            if (username.isBlank()) {
-                sendV2Error(out, "payload", "Missing username")
-                return true
-            }
-
-            plugin.receiveVote(serviceName, username)
-            out.write("""{"status":"ok"}""".toByteArray(StandardCharsets.UTF_8))
-            out.flush()
-            return true
+    private fun parseEnvelope(payload: String, out: java.io.OutputStream): V2Envelope? {
+        return try {
+            gson.fromJson(payload, V2Envelope::class.java)
         } catch (e: Exception) {
-            plugin.logger.warning("Failed to parse Votifier v2 payload: ${e.message}")
+            plugin.logger.warning("Failed to parse Votifier v2 envelope: ${e.message}")
             sendV2Error(out, "payload", "Invalid JSON payload")
-            return true
+            null
+        } ?: run {
+            sendV2Error(out, "payload", "Invalid JSON payload")
+            null
+        }
+    }
+
+    private fun isValidSignature(envelope: V2Envelope): Boolean {
+        val signature = envelope.signature?.trim().orEmpty()
+        val payload = envelope.payload?.trim().orEmpty()
+        if (signature.isBlank() || payload.isBlank()) {
+            return false
+        }
+
+        val expectedSignature = signPayload(payload)
+        return MessageDigest.isEqual(
+            signature.toByteArray(StandardCharsets.UTF_8),
+            expectedSignature.toByteArray(StandardCharsets.UTF_8)
+        )
+    }
+
+    private fun parseVote(payload: String, out: java.io.OutputStream): V2Vote? {
+        return try {
+            gson.fromJson(payload, V2Vote::class.java)
+        } catch (e: Exception) {
+            plugin.logger.warning("Failed to parse Votifier v2 vote: ${e.message}")
+            sendV2Error(out, "payload", "Invalid JSON payload")
+            null
+        } ?: run {
+            sendV2Error(out, "payload", "Invalid JSON payload")
+            null
         }
     }
 
@@ -198,4 +233,15 @@ class VoteReceiver(
     private companion object {
         private const val V2_MAGIC = 0x733A
     }
+
+    private data class V2Envelope(
+        val payload: String? = null,
+        val signature: String? = null
+    )
+
+    private data class V2Vote(
+        val challenge: String? = null,
+        val serviceName: String? = null,
+        val username: String? = null
+    )
 }
