@@ -64,7 +64,7 @@ class VoteStore(private val file: File) {
         }
     }
 
-    fun removePendingVotes(username: String): PendingVote? {
+    fun removePendingVote(username: String): PendingVote? {
         return pendingVotes.remove(username.lowercase())
     }
 

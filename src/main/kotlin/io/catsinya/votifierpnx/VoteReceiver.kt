@@ -9,9 +9,9 @@ import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -27,32 +27,43 @@ class VoteReceiver(
 
     fun start() {
         token = loadOrCreateToken()
-
-        serverSocket = ServerSocket(port)
-        connectionPool = Executors.newFixedThreadPool(4) { runnable ->
-            Thread(runnable, "Votifier-PNX-Worker").apply {
-                isDaemon = true
-            }
-        }
+        serverSocket = openServerSocket()
+        connectionPool = createConnectionPool()
         running.set(true)
         plugin.logger.info("Vote receiver started on port $port")
 
         Thread({
-            while (running.get()) {
-                try {
-                    val socket = serverSocket?.accept() ?: break
-                    connectionPool?.submit {
-                        handleConnection(socket)
-                    }
-                } catch (e: Exception) {
-                    if (running.get()) {
-                        plugin.logger.warning("Vote receiver accept error: ${e.message}")
-                    }
-                }
-            }
+            acceptConnections()
         }, "Votifier-PNX-Acceptor").apply {
             isDaemon = true
             start()
+        }
+    }
+
+    private fun acceptConnections() {
+        while (running.get()) {
+            try {
+                val socket = serverSocket?.accept() ?: break
+                connectionPool?.submit {
+                    handleConnection(socket)
+                }
+            } catch (e: Exception) {
+                if (running.get()) {
+                    plugin.logger.warning("Vote receiver accept error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun openServerSocket(): ServerSocket {
+        return ServerSocket(port)
+    }
+
+    private fun createConnectionPool(): ExecutorService {
+        return Executors.newFixedThreadPool(4) { runnable ->
+            Thread(runnable, "Votifier-PNX-Worker").apply {
+                isDaemon = true
+            }
         }
     }
 
@@ -126,9 +137,9 @@ class VoteReceiver(
 
         val payloadBytes = ByteArray(length)
         dataIn.readFully(payloadBytes)
-        val rawPayload = String(payloadBytes, StandardCharsets.UTF_8)
 
         try {
+            val rawPayload = String(payloadBytes, StandardCharsets.UTF_8)
             val envelope = gson.fromJson(rawPayload, JsonObject::class.java)
             val payload = envelope.get("payload")?.asString ?: run {
                 sendV2Error(out, "payload", "Missing payload")

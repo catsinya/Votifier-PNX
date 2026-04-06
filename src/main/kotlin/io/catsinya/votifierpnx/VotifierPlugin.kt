@@ -4,6 +4,8 @@ import cn.nukkit.event.EventHandler
 import cn.nukkit.event.Listener
 import cn.nukkit.event.player.PlayerJoinEvent
 import cn.nukkit.plugin.PluginBase
+import cn.nukkit.command.CommandSender
+import cn.nukkit.Player
 import java.io.File
 
 class VotifierPlugin : PluginBase(), Listener {
@@ -45,25 +47,19 @@ class VotifierPlugin : PluginBase(), Listener {
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
-        deliverPendingVotes(event.player.name)
+        deliverPendingVote(event.player)
     }
 
-    fun showVoteLinks(sender: cn.nukkit.command.CommandSender) {
-        val header = color(config.getString("messages.vote-command-header", "&6=== &e&lVote for the Server &6==="))
-        val linksLine = color(config.getString("messages.vote-command-links", "&eVote links:"))
-        sender.sendMessage(header)
+    fun showVoteLinks(sender: CommandSender) {
+        sendMessage(sender, "messages.vote-command-header", DEFAULT_VOTE_HEADER)
         sender.sendMessage("")
-        sender.sendMessage(linksLine)
+        sendMessage(sender, "messages.vote-command-links", DEFAULT_VOTE_LINKS_LABEL)
 
-        for (link in config.getMapList("vote-links")) {
-            val name = link["name"]?.toString().orEmpty()
-            val url = link["url"]?.toString().orEmpty()
-            if (name.isNotBlank() && url.isNotBlank()) {
-                val line = config.getString("messages.vote-command-line", "  - %name%: %url%")
-                    .replace("%name%", name)
-                    .replace("%url%", url)
-                sender.sendMessage(color(line))
-            }
+        for (link in readVoteLinks()) {
+            val line = config.getString("messages.vote-command-line", DEFAULT_VOTE_LINK_LINE)
+                .replace("%name%", link.name)
+                .replace("%url%", link.url)
+            sender.sendMessage(color(line))
         }
     }
 
@@ -75,8 +71,7 @@ class VotifierPlugin : PluginBase(), Listener {
             server.scheduler.scheduleDelayedTask(this, Runnable {
                 if (player.isOnline) {
                     rewardPlayer(player.name, serviceName)
-                    player.sendMessage(color(config.getString("messages.vote-received", "&6Thanks for voting on &e%service%&6!")
-                        .replace("%service%", serviceName)))
+                    sendVoteReceivedMessage(player, serviceName)
                 }
             }, 1)
             return
@@ -86,23 +81,18 @@ class VotifierPlugin : PluginBase(), Listener {
         voteStore.save()
     }
 
-    private fun deliverPendingVotes(username: String) {
-        val pending = voteStore.getPendingVote(username) ?: return
+    private fun deliverPendingVote(player: Player) {
+        val pending = voteStore.getPendingVote(player.name) ?: return
         server.scheduler.scheduleDelayedTask(this, Runnable {
-            val player = server.getPlayer(username) ?: return@Runnable
-            if (!player.isOnline) return@Runnable
+            val currentPlayer = server.getPlayer(player.name) ?: return@Runnable
+            if (!currentPlayer.isOnline) return@Runnable
 
             repeat(pending.count) {
-                rewardPlayer(player.name, pending.serviceName)
+                rewardPlayer(currentPlayer.name, pending.serviceName)
             }
-            player.sendMessage(color(config.getString("messages.vote-pending-delivered", "&6Your pending vote reward has been delivered.")))
-            player.sendMessage(
-                color(
-                    config.getString("messages.vote-received", "&6Thanks for voting on &e%service%&6!")
-                        .replace("%service%", pending.serviceName)
-                )
-            )
-            voteStore.removePendingVotes(username)
+            sendMessage(currentPlayer, "messages.vote-pending-delivered", DEFAULT_PENDING_DELIVERED)
+            sendVoteReceivedMessage(currentPlayer, pending.serviceName)
+            voteStore.removePendingVote(currentPlayer.name)
             voteStore.save()
         }, 20)
     }
@@ -127,7 +117,39 @@ class VotifierPlugin : PluginBase(), Listener {
         }
     }
 
+    private fun sendVoteReceivedMessage(player: Player, serviceName: String) {
+        val message = config.getString("messages.vote-received", DEFAULT_VOTE_RECEIVED)
+            .replace("%service%", serviceName)
+        player.sendMessage(color(message))
+    }
+
+    private fun sendMessage(sender: CommandSender, key: String, defaultValue: String) {
+        sender.sendMessage(color(config.getString(key, defaultValue)))
+    }
+
+    private fun readVoteLinks(): List<VoteLink> {
+        return config.getMapList("vote-links")
+            .mapNotNull { entry ->
+                val name = entry["name"]?.toString()?.trim().orEmpty()
+                val url = entry["url"]?.toString()?.trim().orEmpty()
+                if (name.isBlank() || url.isBlank()) {
+                    return@mapNotNull null
+                }
+                VoteLink(name, url)
+            }
+    }
+
     private fun color(message: String): String {
         return message.replace('&', '§')
+    }
+
+    private data class VoteLink(val name: String, val url: String)
+
+    private companion object {
+        const val DEFAULT_VOTE_HEADER = "&6=== &e&lVote for the Server &6==="
+        const val DEFAULT_VOTE_LINKS_LABEL = "&eVote links:"
+        const val DEFAULT_VOTE_LINK_LINE = "  - %name%: %url%"
+        const val DEFAULT_VOTE_RECEIVED = "&6Thanks for voting on &e%service%&6!"
+        const val DEFAULT_PENDING_DELIVERED = "&6Your pending vote reward has been delivered."
     }
 }
